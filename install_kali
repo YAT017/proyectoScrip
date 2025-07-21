@@ -1,0 +1,168 @@
+#!/bin/bash
+
+# Script de instalación específico para Kali Linux
+# Maneja el entorno Python "externally-managed"
+
+set -e
+
+echo "=== INSTALADOR PARA KALI LINUX - SISTEMA DE FACTURACIÓN ==="
+echo "Manejando entorno Python externally-managed"
+echo ""
+
+# Función para logging
+log_install() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Actualizar repositorios
+log_install "Actualizando repositorios del sistema..."
+sudo apt update
+
+# Instalar dependencias del sistema primero
+log_install "Instalando dependencias base del sistema..."
+sudo apt install -y python3 python3-pip python3-venv
+
+# Instalar LaTeX
+log_install "Instalando LaTeX (TeX Live)..."
+sudo apt install -y texlive-latex-base texlive-latex-extra texlive-fonts-recommended texlive-lang-spanish
+
+# Instalar PowerShell para Linux
+if ! command -v pwsh >/dev/null 2>&1; then
+    log_install "Instalando PowerShell para Linux..."
+    
+    # Método actualizado para Kali Linux
+    curl -sSL https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+    echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-debian-bullseye-prod bullseye main" | sudo tee /etc/apt/sources.list.d/microsoft.list
+    sudo apt update
+    sudo apt install -y powershell
+else
+    log_install "PowerShell ya está instalado"
+fi
+
+# Instalar herramientas del sistema
+log_install "Instalando herramientas adicionales..."
+sudo apt install -y cron mailutils sed gawk
+
+# Manejar Python packages con entorno gestionado externamente
+log_install "Configurando entorno Python..."
+
+# Método 1: Intentar paquetes del sistema primero
+log_install "Intentando instalar python3-faker desde repositorios..."
+if sudo apt install -y python3-faker 2>/dev/null; then
+    log_install "✓ python3-faker instalado desde repositorios"
+    FAKER_METHOD="system"
+else
+    log_install "python3-faker no disponible, usando pip con --break-system-packages"
+    pip3 install --break-system-packages faker
+    FAKER_METHOD="pip"
+fi
+
+# Crear entorno virtual como alternativa
+log_install "Creando entorno virtual como respaldo..."
+python3 -m venv venv_facturacion
+source venv_facturacion/bin/activate
+pip install faker
+deactivate
+
+# Crear script wrapper para usar el entorno virtual si es necesario
+cat > run_with_venv.sh << 'EOF'
+#!/bin/bash
+# Script wrapper para ejecutar Python con entorno virtual si es necesario
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Verificar si Faker está disponible en el sistema
+if python3 -c "import faker" 2>/dev/null; then
+    # Usar Python del sistema
+    python3 "$@"
+else
+    # Usar entorno virtual
+    source venv_facturacion/bin/activate
+    python3 "$@"
+    deactivate
+fi
+EOF
+
+chmod +x run_with_venv.sh
+
+# Crear directorios necesarios
+log_install "Creando estructura de directorios..."
+mkdir -p facturas logs scripts
+
+# Configurar permisos
+log_install "Configurando permisos..."
+chmod +x *.sh
+
+# Configurar cron
+log_install "Configurando tareas de cron..."
+sudo systemctl start cron
+sudo systemctl enable cron
+
+# Crear crontab actualizado que use el wrapper
+cat > temp_crontab << EOF
+# Sistema de Facturación Automatizada - Kali Linux
+# Generar facturas a las 01:00
+0 1 * * * cd $(pwd) && ./cron_job.sh facturas >> cron_automation.log 2>&1
+
+# Enviar correos a las 02:00  
+0 2 * * * cd $(pwd) && ./cron_job.sh envios >> cron_automation.log 2>&1
+
+# Crear usuarios a las 03:00 (si hay archivo)
+0 3 * * * cd $(pwd) && ./cron_job.sh usuarios >> cron_automation.log 2>&1
+
+# Generar reporte diario a las 23:00
+0 23 * * * cd $(pwd) && ./cron_job.sh reporte >> cron_automation.log 2>&1
+
+# Generar nuevas compras cada 6 horas (opcional)
+0 */6 * * * cd $(pwd) && ./cron_job.sh compras >> cron_automation.log 2>&1
+EOF
+
+crontab temp_crontab
+rm temp_crontab
+
+# Verificar instalaciones
+log_install "Verificando instalaciones..."
+
+echo ""
+echo "=== VERIFICACIÓN DE DEPENDENCIAS ==="
+
+# Verificar Python y Faker
+if python3 -c "import faker; print('✓ Faker disponible en sistema')" 2>/dev/null; then
+    echo "✓ Python 3 y Faker (sistema): OK"
+elif source venv_facturacion/bin/activate && python3 -c "import faker; print('✓ Faker disponible en venv')" 2>/dev/null; then
+    echo "✓ Python 3 y Faker (venv): OK"
+    deactivate
+else
+    echo "✗ Error con Python 3 o Faker"
+fi
+
+# Verificar LaTeX
+if pdflatex --version >/dev/null 2>&1; then
+    echo "✓ LaTeX (pdflatex): OK"
+else
+    echo "✗ Error con LaTeX"
+fi
+
+# Verificar PowerShell
+if pwsh -c "Write-Host '✓ PowerShell OK'" 2>/dev/null; then
+    echo "✓ PowerShell: OK"
+else
+    echo "✗ Error con PowerShell"
+fi
+
+echo ""
+echo "=== INSTALACIÓN COMPLETADA PARA KALI LINUX ==="
+echo ""
+echo "IMPORTANTE:"
+echo "- Si Faker no funciona con python3 directamente, use: ./run_with_venv.sh generador_compras.py"
+echo "- Configure las credenciales de email en enviador.py"
+echo "- El sistema está listo para usar"
+echo ""
+echo "Comandos de prueba:"
+echo "1. ./run_with_venv.sh generador_compras.py 10"
+echo "2. ./generador_facturas.sh"
+echo "3. python3 enviador.py"
+echo "4. ./cron_job.sh completo"
+
+log_install "Instalación para Kali Linux completada exitosamente"
