@@ -1,0 +1,27 @@
+# Manejo de dependencias en sistemas con entorno gestionado externamente
+import sys
+import subprocess
+
+def install_faker_if_needed():
+    """Instala Faker si no está disponible"""
+    try:
+        import faker
+        return True
+    except ImportError:
+        print("Faker no encontrado, intentando instalación...")
+        try:
+            # Intentar instalación con --break-system-packages
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", 
+                "--break-system-packages", "faker"
+            ])
+            import faker
+            return True
+        except:
+            print("Error: No se pudo instalar Faker automáticamente")
+            print("Ejecute manualmente: pip3 install --break-system-packages faker")
+            return False
+
+# Verificar e instalar Faker si es necesario
+if not install_faker_if_needed():
+    sys.exit(1)
